@@ -17,9 +17,9 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
     """ This is a goon that walks around in the Cashbot CFO final
     battle scene, tormenting Toons, and also providing ammo for
     defeating the boss. """
-
+    
     legLength = 10
-
+    
     # A table of likely directions for the next choice at each point.
     # The table contains (heading, weight), where heading is the
     # direction of choice, and weight is the relative preference of
@@ -38,7 +38,7 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
      (120, 2),
      (-120, 2),
      (180, 1)]
-
+     
     offMask = BitMask32(0)
     onMask = CollisionNode.getDefaultCollideMask()
 
@@ -82,11 +82,11 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
 
         # Here we ask the boss to damage the toon, instead of asking
         # the level to do it.
-
+        
         avatar = self.air.doId2do.get(avId)
         if avatar:
             self.boss.damageToon(avatar, self.strength)
-
+            
         DistributedGoonAI.DistributedGoonAI.requestBattle(self, pauseTime)
 
     def sendMovie(self, type, avId = 0, pauseTime = 0):
@@ -106,29 +106,32 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         # Chooses a random point to walk towards.
         direction = self.__chooseDirection()
         if direction == None:
+            # No place to go; just blow up.
+            self.target = None
+            self.arrivalTime = None
+            self.b_destroyGoon()
             return
-
+            
         heading, dist = direction
         dist = min(dist, self.legLength)
         targetH = PythonUtil.reduceAngle(self.getH() + heading)
-
+        
         # How long will it take to rotate to position?
         origH = self.getH()
         h = PythonUtil.fitDestAngle2Src(origH, targetH)
         delta = abs(h - origH)
         turnTime = delta / (self.velocity * 5)
-
+        
         # And how long will it take to walk to position?
         walkTime = dist / self.velocity
-
+        
         self.setH(targetH)
         self.target = self.boss.scene.getRelativePoint(self, Point3(0, dist, 0))
-
+        
         self.departureTime = globalClock.getFrameTime()
         self.arrivalTime = self.departureTime + turnTime + walkTime + extraDelay
-
+        
         self.d_setTarget(self.target[0], self.target[1], h, globalClockDelta.localToNetworkTime(self.arrivalTime))
-        self.__startWalk()
         return
 
     def __chooseDirection(self):
@@ -142,22 +145,22 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         self.tubeNode.setIntoCollideMask(self.offMask)
         self.cTrav.traverse(self.boss.scene)
         self.tubeNode.setIntoCollideMask(self.onMask)
-
+        
         entries = {}
-
+        
         # Walk through the entries from farthest to nearest, so that
         # nearer collisions on the same segment will override farther
         # ones.
         self.cQueue.sortEntries()
-
+        
         for i in xrange(self.cQueue.getNumEntries() - 1, -1, -1):
             entry = self.cQueue.getEntry(i)
             dist = Vec3(entry.getSurfacePoint(self)).length()
-
+            
             if dist < 1.2:
                 # Too close; forget it.
                 dist = 0
-
+                
             entries[entry.getFrom()] = dist
 
         # Now get the lengths of the various paths, and accumulate a
@@ -170,7 +173,7 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
             heading, weight = self.directionTable[i]
             seg = self.feelers[i]
             dist = entries.get(seg, self.feelerLength)
-
+            
             score = dist * weight
             netScore += score
             scoreTable.append(score)
@@ -179,7 +182,7 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
             # If no paths were any good, bail.
             self.notify.info('Could not find a path for %s' % self.doId)
             return None
-
+        
         # And finally, choose a random direction from the table,
         # with a random distribution weighted by score.
         s = random.uniform(0, netScore)
@@ -203,18 +206,18 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         # cares about that.
         if self.arrivalTime == None:
             return
-
+            
         now = globalClock.getFrameTime()
         availableTime = self.arrivalTime - now
-
+        
         if availableTime > 0:
             # Change the tube to encapsulate our path to our target point.
             point = self.getRelativePoint(self.boss.scene, self.target)
             self.tube.setPointB(point)
             self.node().resetPrevTransform()
-
+            
             taskMgr.doMethodLater(availableTime, self.__reachedTarget, self.uniqueName('reachedTarget'))
-
+            
             self.isWalking = 1
         else:
             self.__reachedTarget(None)
@@ -224,28 +227,28 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         if self.isWalking:
             # Stop the walk do-later.
             taskMgr.remove(self.uniqueName('reachedTarget'))
-
+            
             # Place us at the appropriate point along the path.
             if pauseTime == None:
                 now = globalClock.getFrameTime()
                 t = (now - self.departureTime) / (self.arrivalTime - self.departureTime)
             else:
                 t = pauseTime / (self.arrivalTime - self.departureTime)
-
+                
             t = min(t, 1.0)
             pos = self.getPos()
             self.setPos(pos + (self.target - pos) * t)
 
             # The tube is now a sphere.
             self.tube.setPointB(0, 0, 0)
-
+            
             self.isWalking = 0
         return
 
     def __reachedTarget(self, task):
         self.__stopWalk()
         self.__chooseTarget()
-
+        self.__startWalk()
 
     def __recoverWalk(self, task):
         self.demand('Walk')
@@ -256,8 +259,8 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         DistributedCashbotBossObjectAI.DistributedCashbotBossObjectAI.doFree(self, task)
         self.demand('Walk')
         return Task.done
-
-
+        
+    
     ### Messages ###
 
     def requestStunned(self, pauseTime):
@@ -275,18 +278,18 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
             # Already stunned, or just picked up by a magnet; don't
             # stun again.
             return
-
+            
         # Stop the goon right where he is.
         self.__stopWalk(pauseTime)
-
+        
         # And it poops out a treasure right there.
         self.boss.makeTreasure(self)
-
+        
         # Update stats and add track combo for points
         self.boss.d_updateGoonsStomped(avId)
         comboTracker = self.boss.comboTrackers[avId]
         comboTracker.incrementCombo(comboTracker.combo+1)
-
+        
         DistributedGoonAI.DistributedGoonAI.requestStunned(self, pauseTime)
 
     def getMinImpact(self):
@@ -333,12 +336,12 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
     def destroyGoon(self):
         # The client or AI informs the world that the goon has
         # shuffled off this mortal coil.
-
+        
         self.demand('Off')
         #if self in self.boss.goons:
             #self.boss.goons.remove(self)
-
-
+            
+    
     ### FSM States ###
 
     def enterOff(self):
@@ -361,11 +364,12 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
 
     def enterWalk(self):
         # The goon is prowling about, looking for trouble.
-
+        
         self.avId = 0
         self.craneId = 0
-
+        
         self.__chooseTarget()
+        self.__startWalk()
         self.d_setObjectState('W', 0, 0)
 
     def exitWalk(self):
@@ -375,23 +379,23 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         # The goon is emerging from door a.
         self.avId = 0
         self.craneId = 0
-
+        
         h = 0
         dist = 15
         pos = self.boss.getPos()
         walkTime = dist / self.velocity
-
+        
         self.setPosHpr(pos[0], pos[1], pos[2], h, 0, 0)
         self.d_setPosHpr(pos[0], pos[1], pos[2], h, 0, 0)
         self.target = self.boss.scene.getRelativePoint(self, Point3(0, dist, 0))
         self.departureTime = globalClock.getFrameTime()
         self.arrivalTime = self.departureTime + walkTime
-
+        
         self.d_setTarget(self.target[0], self.target[1], h, globalClockDelta.localToNetworkTime(self.arrivalTime))
-
+        
         self.__startWalk()
         self.d_setObjectState('a', 0, 0)
-
+        
         taskMgr.doMethodLater(walkTime, self.__recoverWalk, self.uniqueName('recoverWalk'))
 
     def exitEmergeA(self):
@@ -402,23 +406,23 @@ class DistributedCashbotBossGoonAI(DistributedGoonAI.DistributedGoonAI, Distribu
         # The goon is emerging from door b.
         self.avId = 0
         self.craneId = 0
-
+        
         h = 180
         dist = 15
         pos = self.boss.getPos()
         walkTime = dist / self.velocity
-
+        
         self.setPosHpr(pos[0], pos[1], pos[2], h, 0, 0)
         self.d_setPosHpr(pos[0], pos[1], pos[2], h, 0, 0)
         self.target = self.boss.scene.getRelativePoint(self, Point3(0, dist, 0))
         self.departureTime = globalClock.getFrameTime()
         self.arrivalTime = self.departureTime + walkTime
-
+        
         self.d_setTarget(self.target[0], self.target[1], h, globalClockDelta.localToNetworkTime(self.arrivalTime))
-
+        
         self.__startWalk()
         self.d_setObjectState('b', 0, 0)
-
+        
         taskMgr.doMethodLater(walkTime, self.__recoverWalk, self.uniqueName('recoverWalk'))
 
     def exitEmergeB(self):
